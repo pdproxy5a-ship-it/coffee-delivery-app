@@ -15,10 +15,6 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
-  box-sizing: border-box;
-}
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

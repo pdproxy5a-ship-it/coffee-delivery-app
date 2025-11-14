@@ -4,6 +4,7 @@ export default function LocationPicker({ onLocationConfirm, onBack }) {
   const [location, setLocation] = useState('');
   const [useCurrentLocation, setUseCurrentLocation] = useState(false);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const getCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -14,33 +15,107 @@ export default function LocationPicker({ onLocationConfirm, onBack }) {
     setIsGettingLocation(true);
     
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
-        // In a real app, you'd reverse geocode this to get an address
-        setLocation(`Near ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-        setUseCurrentLocation(true);
-        setIsGettingLocation(false);
+        
+        try {
+          // Call our API to reverse geocode the coordinates
+          const response = await fetch(`/api/location?lat=${latitude}&lng=${longitude}`);
+          const data = await response.json();
+          
+          if (data.success) {
+            setLocation(data.data.address);
+            setUseCurrentLocation(true);
+          } else {
+            setLocation(`Near ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          }
+        } catch (error) {
+          console.error('Error reverse geocoding:', error);
+          setLocation(`Near ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        } finally {
+          setIsGettingLocation(false);
+        }
       },
       (error) => {
         console.error('Error getting location:', error);
-        alert('Unable to get your location. Please enter it manually.');
+        let errorMessage = 'Unable to get your location. Please enter it manually.';
+        
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = 'Location access was denied. Please enable location services or enter address manually.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = 'Location information is unavailable. Please enter your address manually.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = 'Location request timed out. Please try again or enter address manually.';
+            break;
+        }
+        
+        alert(errorMessage);
         setIsGettingLocation(false);
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 15000,
         maximumAge: 60000
       }
     );
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!location.trim()) {
       alert('Please enter your location or use your current location');
       return;
     }
-    onLocationConfirm(location);
+
+    setIsSubmitting(true);
+
+    try {
+      // Send location to our API for validation and processing
+      const locationData = {
+        address: location,
+        coordinates: useCurrentLocation ? getCoordinatesFromLocation(location) : null,
+        userId: 'user-' + Date.now() // In real app, use actual user ID
+      };
+
+      const response = await fetch('/api/location', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(locationData),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        onLocationConfirm({
+          address: location,
+          ...data.data
+        });
+      } else {
+        alert(data.message);
+      }
+    } catch (error) {
+      console.error('Error submitting location:', error);
+      alert('Error processing location. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Helper function to extract coordinates from location string
+  const getCoordinatesFromLocation = (locationString) => {
+    const coordMatch = locationString.match(/Near ([\d.-]+), ([\d.-]+)/);
+    if (coordMatch) {
+      return {
+        lat: parseFloat(coordMatch[1]),
+        lng: parseFloat(coordMatch[2])
+      };
+    }
+    return null;
   };
 
   return (
@@ -59,15 +134,18 @@ export default function LocationPicker({ onLocationConfirm, onBack }) {
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label className="block text-amber-800 font-medium mb-2">
-            Delivery Address
+            Delivery Address *
           </label>
           <textarea
             value={location}
             onChange={(e) => setLocation(e.target.value)}
-            placeholder="Enter your complete address..."
+            placeholder="Enter your complete address (street, barangay, city)..."
             className="w-full h-24 px-4 py-3 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
             required
           />
+          <p className="text-sm text-amber-600 mt-1">
+            Please provide specific landmarks or complete address for accurate delivery
+          </p>
         </div>
 
         <div className="flex items-center justify-between">
@@ -92,12 +170,29 @@ export default function LocationPicker({ onLocationConfirm, onBack }) {
 
           <button
             type="submit"
-            className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors"
+            disabled={isSubmitting || !location.trim()}
+            className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Continue to Order
+            {isSubmitting ? (
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <span>Checking...</span>
+              </div>
+            ) : (
+              'Continue to Order'
+            )}
           </button>
         </div>
       </form>
+
+      {useCurrentLocation && (
+        <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+          <p className="text-green-700 text-sm flex items-center">
+            <span className="mr-2">✅</span>
+            Using your current location for accurate delivery
+          </p>
+        </div>
+      )}
     </div>
   );
 }
