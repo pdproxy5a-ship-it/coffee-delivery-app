@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import GCashPayment from './GCashPayment';
+import FacebookAuth from './FacebookLogin';
 
 export default function OrderForm({ coffee, location, onOrderComplete, onBack }) {
   const [customerInfo, setCustomerInfo] = useState({
@@ -7,44 +9,75 @@ export default function OrderForm({ coffee, location, onOrderComplete, onBack })
     email: '',
     specialInstructions: ''
   });
-  const [paymentMethod, setPaymentMethod] = useState('gcash');
+  const [paymentMethod, setPaymentMethod] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showGCash, setShowGCash] = useState(false);
+  const [user, setUser] = useState(null);
 
-  const handleInputChange = (e) => {
-    setCustomerInfo({
-      ...customerInfo,
-      [e.target.name]: e.target.value
-    });
+  const handleFacebookLogin = (userData) => {
+    setUser(userData);
+    setCustomerInfo(prev => ({
+      ...prev,
+      name: userData.name,
+      email: userData.email
+    }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleFacebookLogout = () => {
+    setUser(null);
+  };
+
+  const handleGCashSuccess = (paymentData) => {
+    // Process order with successful GCash payment
+    processOrder('gcash', paymentData);
+  };
+
+  const processOrder = async (method, paymentData = null) => {
     setIsSubmitting(true);
 
-    // Simulate API call
     try {
       const orderData = {
         coffee,
         location,
-        customerInfo,
-        paymentMethod,
+        customerInfo: user ? { ...customerInfo, facebookId: user.id } : customerInfo,
+        paymentMethod: method,
+        paymentData,
+        user,
         orderTime: new Date().toISOString()
       };
 
-      // In a real app, you'd send this to your backend
-      console.log('Order data:', orderData);
-      
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      alert('Order placed successfully! We will contact you shortly.');
-      onOrderComplete();
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(orderData),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert('Order placed successfully! We will contact you shortly.');
+        onOrderComplete();
+      } else {
+        alert('Error placing order: ' + result.message);
+      }
     } catch (error) {
       alert('Error placing order. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (showGCash) {
+    return (
+      <GCashPayment
+        amount={coffee.price}
+        onSuccess={handleGCashSuccess}
+        onCancel={() => setShowGCash(false)}
+      />
+    );
+  }
 
   return (
     <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-lg overflow-hidden">
@@ -59,19 +92,24 @@ export default function OrderForm({ coffee, location, onOrderComplete, onBack })
       </div>
 
       <div className="p-6">
+        {/* Facebook Login Section */}
+        <div className="mb-6">
+          <FacebookAuth onLogin={handleFacebookLogin} onLogout={handleFacebookLogout} />
+        </div>
+
         {/* Order Summary */}
         <div className="bg-amber-50 rounded-lg p-4 mb-6">
           <h3 className="font-semibold text-amber-900 mb-2">Order Summary</h3>
           <div className="flex justify-between items-center">
             <div>
               <p className="font-medium">{coffee.name}</p>
-              <p className="text-sm text-amber-700">Delivery to: {location}</p>
+              <p className="text-sm text-amber-700">Delivery to: {location.address}</p>
             </div>
             <p className="font-bold text-amber-900">₱{coffee.price}</p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
           {/* Customer Information */}
           <div>
             <h3 className="font-semibold text-amber-900 mb-4">Your Information</h3>
@@ -102,86 +140,43 @@ export default function OrderForm({ coffee, location, onOrderComplete, onBack })
                   className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                 />
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-amber-800 mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={customerInfo.email}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                />
-              </div>
             </div>
-          </div>
-
-          {/* Special Instructions */}
-          <div>
-            <label className="block text-sm font-medium text-amber-800 mb-1">
-              Special Instructions
-            </label>
-            <textarea
-              name="specialInstructions"
-              value={customerInfo.specialInstructions}
-              onChange={handleInputChange}
-              placeholder="Any special requests for your order..."
-              className="w-full h-20 px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
-            />
           </div>
 
           {/* Payment Method */}
           <div>
             <h3 className="font-semibold text-amber-900 mb-4">Payment Method</h3>
             <div className="space-y-3">
-              <label className="flex items-center space-x-3 p-4 border border-amber-300 rounded-lg cursor-pointer hover:bg-amber-50">
-                <input
-                  type="radio"
-                  name="payment"
-                  value="gcash"
-                  checked={paymentMethod === 'gcash'}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="text-amber-500 focus:ring-amber-500"
-                />
-                <div>
-                  <p className="font-medium">GCash</p>
-                  <p className="text-sm text-amber-700">Pay with GCash mobile app</p>
+              <button
+                type="button"
+                onClick={() => setShowGCash(true)}
+                className="w-full flex items-center space-x-3 p-4 border border-green-300 rounded-lg hover:bg-green-50 transition-colors text-left"
+              >
+                <div className="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center">
+                  <span className="text-white text-lg">💰</span>
                 </div>
-              </label>
+                <div>
+                  <p className="font-medium">Pay with GCash</p>
+                  <p className="text-sm text-gray-600">Instant secure payment</p>
+                </div>
+              </button>
               
-              <label className="flex items-center space-x-3 p-4 border border-amber-300 rounded-lg cursor-pointer hover:bg-amber-50">
-                <input
-                  type="radio"
-                  name="payment"
-                  value="cod"
-                  checked={paymentMethod === 'cod'}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="text-amber-500 focus:ring-amber-500"
-                />
+              <button
+                type="button"
+                onClick={() => processOrder('cod')}
+                disabled={isSubmitting}
+                className="w-full flex items-center space-x-3 p-4 border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors text-left disabled:opacity-50"
+              >
+                <div className="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center">
+                  <span className="text-white text-lg">💵</span>
+                </div>
                 <div>
                   <p className="font-medium">Cash on Delivery</p>
-                  <p className="text-sm text-amber-700">Pay when you receive your order</p>
+                  <p className="text-sm text-gray-600">Pay when you receive your order</p>
                 </div>
-              </label>
+              </button>
             </div>
           </div>
-
-          {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-4 px-6 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
-          >
-            {isSubmitting ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                Placing Order...
-              </>
-            ) : (
-              `Place Order - ₱${coffee.price}`
-            )}
-          </button>
         </form>
       </div>
     </div>
